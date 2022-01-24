@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+cached = "0.30.0"
+clap = {version="3.0.10",features=["derive"]}
 image = "0.23.14"
 photon-rs = {git="https://github.com/silvia-odwyer/photon"}
 rand = "0.8.4"
