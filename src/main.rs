@@ -31,11 +31,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //let img = open_image("data/00056v.jpg").expect("File should open");
     println!("w,h {} {}", img.get_width(), img.get_height());
     let orig = realign(img.clone(), Method::None, 10000.0, 1.0, 1);
-    //let brute = realign(img.clone(), Method::Scale, 10000.0, 100.0, 1);
+    //let new = realign(img.clone(), Method::Scale, 10000.0, 100.0, args.scale);
     let new = realign(img, Method::GradientDescent, args.learn, args.epsilon, args.scale);
     save_image(orig, "img.jpg")?;
     save_image(new.clone(), "img2.jpg")?;
-    save_image(new, format!("processed/{}",args.file).as_str())?;
+    //save_image(new, format!("processed/{}",args.file).as_str())?;
     //save_image(brute, "img3.jpg")?;
     Ok(())
 }
@@ -78,16 +78,24 @@ fn realign(img: PhotonImage, method: Method, delta: f64, epsilon: f64, scale: u3
     );
     let width = img.get_width();
     let height = img.get_height();
-    let b_channel = crop(&mut img, 0, 0, width, height / 3);
-    let g_channel = crop(&mut img, 0, height / 3, width, 2 * height / 3);
-    let r_channel = crop(&mut img, 0, 2 * height / 3, width, 3 * height / 3);
+    let mut b_channel = crop(&mut img, 0, 0, width, height / 3);
+    let mut g_channel = crop(&mut img, 0, height / 3, width, 2 * height / 3);
+    let mut r_channel = crop(&mut img, 0, 2 * height / 3, width, 3 * height / 3);
+    reverse_grayscale(&mut r_channel, 0);
+    reverse_grayscale(&mut g_channel, 1);
+    reverse_grayscale(&mut b_channel, 2);
     let (p_rg, p_gb,p_rb,p_rg_p, p_gb_p,p_rb_p) = match method {
         Method::Scale => {
+            let (g, b, p_gb) = brute_force(g_channel, b_channel, (Channel::G, Channel::B).into(), 15,true);
+            let (g, b, p_gb_p) = brute_force(g, b, (Channel::G, Channel::B).into(), 15,false);
             let (r, g, p_rg) =
-                brute_force(r_channel, g_channel, (Channel::R, Channel::G).into(), 15);
-            let (g, b, p_gb) = brute_force(g, b_channel, (Channel::G, Channel::B).into(), 15);
-            let (_, _, p_rb) = brute_force(r, b, (Channel::R, Channel::B).into(), 15);
-            (p_rg, p_gb,p_rb,0.0,0.0,0.0)
+                brute_force(r_channel, g, (Channel::R, Channel::G).into(), 15,true);
+
+            let (r, g, p_rg_p) =
+                brute_force(r, g, (Channel::R, Channel::G).into(), 15,false);
+            let (r, b, p_rb) = brute_force(r, b, (Channel::R, Channel::B).into(), 15,true);
+            let (_, _, p_rb_p) = brute_force(r, b, (Channel::R, Channel::B).into(), 15,false);
+            (p_rg, p_gb,p_rb,p_rg_p, p_gb_p,p_rb_p)
         }
         Method::GradientDescent => {
             let (g, b, p_gb) = gradient_descent(
@@ -213,14 +221,14 @@ fn difference(pi_a: &PhotonImage, pi_b: &PhotonImage) -> f64 {
         .into_iter()
         .zip(pixels_b.into_iter())
         .map(|((_, _, a), (_, _, b))| {
+            if a.channels()[3] == 0 || b.channels()[3] == 0{
+                return (0.0,0.0,0.0);
+            }
             let b = b.to_luma();
             let a = a.to_luma();
             let mut b = b.channels()[0] as f64;
-          //if a.channels()[3] == 0 {
-          //    b = 0.0;
-          //}
             let a = a.channels()[0] as f64;
-            (a * b, a.powf(2.0), b.powf(2.0))
+            (a*a * b*b, a.powf(4.0), b.powf(4.0))
         })
         .fold((0.0, 0.0, 0.0), |(x, y, z), (a, b, c)| {
             (x + a, b + y, z + c)
@@ -231,17 +239,24 @@ fn difference(pi_a: &PhotonImage, pi_b: &PhotonImage) -> f64 {
 fn pad_photo(x: i32, pi_a: &PhotonImage, pi_b: &PhotonImage,side:bool) -> (PhotonImage, PhotonImage) {
     let (pi_a_y, pi_b_y) = if x > 0 { (x.abs(), 0) } else { (0, x.abs()) };
     if side{
-        let pi_a_pad = padding_top(&pi_a, pi_a_y as u32, Rgba::new(255, 255, 255, 255));
-        let pi_b_pad = padding_top(&pi_b, pi_b_y as u32, Rgba::new(255, 255, 255, 255));
+        let pi_a_pad = padding_top(&pi_a, pi_a_y as u32, Rgba::new(0, 0, 0, 0));
+        let pi_b_pad = padding_top(&pi_b, pi_b_y as u32, Rgba::new(0, 0, 0, 0));
+
+        let pi_a_pad = padding_bottom(&pi_a_pad, pi_b_y as u32, Rgba::new(0, 0, 0, 0));
+        let pi_b_pad = padding_bottom(&pi_b_pad, pi_a_y as u32, Rgba::new(0, 0, 0, 0));
         (pi_a_pad, pi_b_pad)
     }else{
-        let pi_a_pad = padding_left(&pi_a, pi_a_y as u32, Rgba::new(255, 255, 255, 255));
-        let pi_b_pad = padding_left(&pi_b, pi_b_y as u32, Rgba::new(255, 255, 255, 255));
-        (pi_a_pad, pi_b_pad)
+      //let pi_a_pad = padding_left(&pi_a, pi_a_y as u32, Rgba::new(0, 0, 0, 0));
+      //let pi_b_pad = padding_left(&pi_b, pi_b_y as u32, Rgba::new(0, 0, 0, 0));
+
+      //let pi_a_pad = padding_right(&pi_a_pad, pi_b_y as u32, Rgba::new(0, 0, 0, 0));
+      //let pi_b_pad = padding_right(&pi_b_pad, pi_a_y as u32, Rgba::new(0, 0, 0, 0));
+        (pi_a.clone(), pi_b.clone())
     }
 }
 
 #[cached(
+    size=20,
     key = "(i32,u8,u8,bool)",
     convert = r#"{(y,channels.a as u8,channels.b as u8,side)}"#
 )]
@@ -262,22 +277,23 @@ fn brute_force(
     pi_b: PhotonImage,
     channels: Channels,
     search_radius: i32,
+    side:bool,
 ) -> (PhotonImage, PhotonImage, f32) {
     let mut best = 0.0;
     let mut best_a = pi_a.clone();
     let mut best_b = pi_b.clone();
     let mut best_p = 0.0;
     for y in (-search_radius)..search_radius {
-        println!("{}", y);
-        let (pi_a_pad, pi_b_pad, diff) = pad_and_diff(y, channels, &pi_a, &pi_b,true);
+        let (pi_a_pad, pi_b_pad, diff) = pad_and_diff(y, channels, &pi_a, &pi_b,side);
+        //println!("y:{} diff: {}",y,diff);
         if diff > best {
-            println!("{} {}", best, diff);
             best = diff;
             best_a = pi_a_pad;
             best_b = pi_b_pad;
             best_p = y as f32;
         }
     }
+    println!("_-----------------");
     (best_a, best_b, best_p)
 }
 
