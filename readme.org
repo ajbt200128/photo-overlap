@@ -377,12 +377,69 @@ fn brute_force(
    calculation, it'd be accurate for the larger images. For example it may say a
    shift value of the scaled down image is 7.53, but when scaled up that'd
    correlate to 75.3 pixels, which means we're losing less information due to
-   scaling than if we used the brute force method with scaling. In total this
-   speeds up the large image search by making it a matter of a minute or two,
-   instead of dozens or possibly an hour (I wasn't patient enough to let the
-   brute force method finish).
+   scaling than if we used the brute force method with scaling.
 
-All images can be found in [[file:./data/processed]]. Below are the vectors used:
+   All together the speedups made a huge difference. First, brute forcing a
+   single large image (01007a.jpg) took three hours and twenty minutes, while
+   the gradient descent method without caching took seventeen minutes. With
+   caching, depending on the parameters, took between three to five minutes.
+   That was fantastic, as it made debugging a much shorter process, and testing
+   different values easier too. As far as visual results go, the brute force
+   method and the gradient descent method were indistinguishable for the smaller
+   images, and neither were the larger images. There's a caveat there though, as
+   I only ran one brute force trial, due to the length, and used a relatively
+   small area to check. Namely a 50x50 area, meaning 2500 different possible
+   combinations, per pair of channels. We see the speed up is clear there too,
+   as per pair of layers, the maximum number of iterations was around 50 for
+   large images, usually reaching the target in less than that (around 30), but
+   my cutoff for stopping wasn't fleshed out that well, so it would hop back and
+   forth between two similar values for a dozen or so iterations. The cutoff
+   function is another thing I would improve if I approached this project again.
+
+  The result of the brute force method was also not very satisfactory as later
+  on I realized I had a major issue with my difference code. Photon-rs returns a
+  vector of pixels, but only a one dimensional one. This means that if the
+  cropping of the slides weren't exactly correct, we'd essentially end up with a
+  shifted comparison, where the first row was accurate, but then the next would
+  be slightly off, so on and so forth. This wasn't the only error of this kind,
+  as I would adjust the positioning of the images by adding a white margin to
+  the left or top accordingly. Since this would also change the shape of the
+  images, and the vector was one dimensional, this would introduce a similar
+  error. Eventually I realized this, and updated the code to add margins to the
+  right and bottom, which helped this significantly. One issue I never managed
+  to figure out, was what color to choose for the margins, as they would
+  contribute to the difference analysis. If I were to reattempt this project, I
+  think I would either add a way to offset what part of the image the difference
+  is taken from, or I would use say a completely transparent margin, with an
+  alpha channel value of 0 as the margin, and then just skip those pixels if the
+  pixel from each image is margin.
+
+  If we look at this image, specifically the vertical alignment of the green channel:
+
+[[./processed/data/01007a.jpg]]
+
+ We see the major drawback of the gradient descent method, or at least my
+ implementation of it. With small images, we usually get the exact same
+ displacement vector as the brute force method, in only one or two iterations
+ instead of 225 (15x15), but larger images seem to always run into a valley, or
+ a local minimum, a section of the image where moving by the displacement factor
+ would decrease image similarity, but if it moved a significant distance it
+ would be an improvement. The second issue would be precision, as the difference
+ for a large image between where it is and a few pixels over isn't even a
+ thousandth of a percent of the image, but still is visible. This is what we're
+ seeing in this image, as the green channel is slightly off, but the log of the
+ algorithm showed that moving a few more pixels as needed didn't produce a
+ significant difference, specifically less than 0.01%. If I were to re approach
+ this issue, I would most likely combine the brute force and gradient descent
+ methods, using the gradient descent to get near an area, and then only brute
+ force a small 10x10 area for the final alignment. Another possibility would be
+ to brute force a small area for the current displacement, and then the
+ displacement the gradient chose, and to use that to calculate the next step, as
+ then we'd have a better picture of what moving in a certain direction looked
+ like.
+
+All images can be found in [[file:./data/processed]]. Below are the vectors
+   used:
 
    | Vectors                           | File                      |
    |-----------------------------------+----------------------------------|
